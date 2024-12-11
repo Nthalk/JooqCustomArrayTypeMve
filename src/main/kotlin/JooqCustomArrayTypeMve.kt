@@ -9,7 +9,9 @@ import org.jooq.impl.DSL
 import org.jooq.meta.jaxb.*
 import org.jooq.meta.jaxb.Target
 import org.jooq.meta.postgres.PostgresDatabase
+import org.postgresql.Driver
 import org.slf4j.LoggerFactory
+import java.util.jar.JarFile
 
 class JooqCustomArrayTypeMve : CliktCommand(name = "gen") {
     companion object {
@@ -20,8 +22,12 @@ class JooqCustomArrayTypeMve : CliktCommand(name = "gen") {
     val user by option("--user", help = "The user of the database").default("postgres")
     val password by option("--password", help = "The password of the database").default("password")
     val schema by option("--schema", help = "The schema of the database").default("public")
+    val version by option("--version", help = "Print version info").flag()
 
-    val noInterfaceWorkaround by option("--no-interface-workaround", help = "Disable interface to workaround bug").flag()
+    val noInterfaceWorkaround by option(
+        "--no-interface-workaround",
+        help = "Disable interface to workaround bug"
+    ).flag()
 
 
     override fun help(context: Context): String {
@@ -30,11 +36,56 @@ class JooqCustomArrayTypeMve : CliktCommand(name = "gen") {
 
     override fun run() {
         System.setProperty("org.jooq.no-logo", "true")
+        if (version) {
+            versionInfo()
+            return
+        }
+
         val jdbcUrlFixed = maybeSetupDocker()
         createInitialModels(jdbcUrlFixed)
         jooqCodeGen(jdbcUrlFixed)
         maybeTearDownDocker()
         compileGenProject()
+    }
+
+    private fun versionInfo() {
+        // Java version
+        println("Java: ${System.getProperty("java.vendor.version")}")
+        // Kotlin version
+        println("Kotlin: ${KotlinVersion.CURRENT}")
+        // Gradle version
+        val gradleVersion = ProcessBuilder("./gradlew", "--version")
+            .start()
+            .inputStream.bufferedReader()
+            .use { it.readText() }
+            .lines()
+            .first { it.startsWith("Gradle") }
+            .split(" ")[1]
+        println("Gradle: ${gradleVersion}")
+        // Os
+        println("OS: ${System.getProperty("os.name")} ${System.getProperty("os.version")}")
+        // Jooq
+        JarFile(DSL::class.java.protectionDomain.codeSource.location.toURI().path).use { jarFile ->
+            val manifest = jarFile.manifest
+            println(
+                "${manifest.mainAttributes.getValue("Bundle-Name")}: ${
+                    manifest.mainAttributes.getValue(
+                        "Bundle-Version"
+                    )
+                }"
+            )
+        }
+        // Postgresql
+        JarFile(Driver::class.java.protectionDomain.codeSource.location.toURI().path).use { jarFile ->
+            val manifest = jarFile.manifest
+            println(
+                "${manifest.mainAttributes.getValue("Bundle-Name")}: ${
+                    manifest.mainAttributes.getValue(
+                        "Bundle-Version"
+                    )
+                }"
+            )
+        }
     }
 
     private fun compileGenProject() {
@@ -146,6 +197,9 @@ class JooqCustomArrayTypeMve : CliktCommand(name = "gen") {
         log.info("Creating initial models at $jdbcUrlFixed...")
         // Generate initial database
         DSL.using(jdbcUrlFixed, user, password).use {
+            // Get the postgresql version
+            val version = it.fetch("SELECT version()").into(String::class.java).first()
+            log.info("Postgresql version: $version")
             it.execute(
                 """
                 CREATE TYPE tag AS
